@@ -1,7 +1,7 @@
 #!/bin/sh
 
 case "$1" in
-  -h|--help|help) echo "sh migrate.sh [-f] [-a] [in-file] [out-file]"; exit 0;;
+  -h|--help|help) echo "sh migrate.sh [-f] [-o] [-a] [in-file] [out-file]"; exit 0;;
 esac;
 
 N="
@@ -15,11 +15,14 @@ esac;
 
 item() { echo "- $@"; }
 die() { [ "$INSTALL" ] || echo "$N$N! $@"; exit 1; }
-grep_get_json() { cat "$FILE" | tr -d '\r\n' | grep -m1 -owE "$1"'"[^,}]+"' | cut -d\" -f3; }
+grep_get_json() { eval set -- "$(cat "$FILE" | tr -d '\r\n' | grep -m1 -o "$1"'".*' | cut -d: -f2-)"; echo "$1" | sed -e 's|"|\\\\\\"|g' -e 's|[,}]*$||'; }
 grep_check_json() { grep -q "$1" "$FILE" && [ "$(grep_get_json $1)" ]; }
 
 case "$1" in
   -f|--force|force) FORCE=1; shift;;
+esac;
+case "$1" in
+  -o|--override|override) OVERRIDE=1; shift;;
 esac;
 case "$1" in
   -a|--advanced|advanced) ADVANCED=1; shift;;
@@ -80,14 +83,18 @@ if [ -z "$DEVICE_INITIAL_SDK_INT" ] && grep_check_json FIRST_API_LEVEL; then
   DEVICE_INITIAL_SDK_INT="$(grep_get_json FIRST_API_LEVEL)";
 fi;
 
-if [ -z "$RELEASE" -o -z "$INCREMENTAL" -o -z "$TYPE" -o -z "$TAGS" ]; then
-  item "Missing default fields found, deriving from FINGERPRINT ...";
+if [ -z "$RELEASE" -o -z "$INCREMENTAL" -o -z "$TYPE" -o -z "$TAGS" -o "$OVERRIDE" ]; then
+  if [ "$OVERRIDE" ]; then
+    item "Overriding values for fields derivable from FINGERPRINT ...";
+  else
+    item "Missing default fields found, deriving from FINGERPRINT ...";
+  fi;
   IFS='/:' read F1 F2 F3 F4 F5 F6 F7 F8 <<EOF
 $(grep_get_json FINGERPRINT)
 EOF
   i=1;
   for FIELD in $FPFIELDS; do
-    eval [ -z "\$$FIELD" ] \&\& $FIELD=\"\$F$i\";
+    eval [ -z \"\$$FIELD\" -o \"$OVERRIDE\" ] \&\& $FIELD=\"\$F$i\";
     i=$((i+1));
   done;
 fi;
@@ -105,6 +112,7 @@ fi;
 if [ -f "$OUT" ]; then
   item "Renaming old file to $(basename "$OUT").bak ...";
   mv -f "$OUT" "$OUT.bak";
+  grep -qE "verboseLogs|VERBOSE_LOGS" "$OUT.bak" && ADVANCED=1;
 fi;
 
 [ "$INSTALL" ] || item "Writing fields and properties to updated custom.pif.json ...";
